@@ -16,6 +16,16 @@ data MachineState = MachineState {
 
 type Memory = DiffArray Int Int
 
+setRegA v state = state { a = v }
+setRegC v state = state { c = v }
+setRegD v state = state { d = v }
+setMem  m state = state { mem = m }
+wrapRegC state = state { c = wrapNum $ c state }
+wrapRegD state = state { d = wrapNum $ d state }
+mangleMemory state = let mem' = mem state
+                         c'   = c state
+                         in state { mem = mem' // [(c', mangleInstruction $ mem' ! c')] }
+
 numericMax :: Int
 numericMax = 59048
 
@@ -46,34 +56,27 @@ eval = do
         let instr = getInstruction (c state) $ chr $ memory ! c state
             datav = memory ! d state
             memory = mem state
-            updateMem = updateAccAndMemory state
+            updateMem = updateAccAndDataPtr state
 
         if validInstruction instr
             then case instr of
-                'j' -> recurWith state { d = datav }
-                'i' -> recurWith state { c = datav }
-                '*' -> recurWith . updateMem $ rotateTrinary datav
+                'j' -> recurWith $ setRegD datav state
+                'i' -> recurWith $ setRegC datav state
+                '*' -> recurWith . updateMem $ rotateTernary datav
                 'p' -> recurWith . updateMem $ op (a state) datav
                 '<' -> do putAscii $ a state
                           recurWith state
                 '/' -> do c <- getAscii
-                          recurWith $ state { a = c }
+                          recurWith $ setRegA c state
                 'v' -> return ()
                 _   -> recurWith state
             else eval
 
-    where recurWith state = do let c' = c state
-                                   mem' = mem state
-                               put state {
-                                         c = wrapAround c',
-                                         d = wrapAround $ d state,
-                                         mem = mem' // [(c', mangleInstruction $ mem' ! c')]
-                                         }
+    where recurWith state = do put . wrapRegD . wrapRegC . mangleMemory $ state
                                eval
 
-          wrapAround v = (v + 1) `mod` numericMax
-
-          updateAccAndMemory state val = state { a = val, mem = mem state // [(d state, val)] }
+          updateAccAndDataPtr state val = let updatedMem = mem state // [(d state, val)]
+                                              in setRegA val $ setMem updatedMem state
 
           putAscii ic = let asciic = ic `mod` 128 -- emulate putc
                             ch = if asciic == 10 then '\n' else chr asciic
@@ -130,8 +133,8 @@ mangleInstruction :: Int -> Int
 mangleInstruction instr = ord $ replacement !! (instr - 33)
     where replacement = "5z]&gqtyfr$(we4{WP)H-Zn,[%\\3dL+Q;>U!pJS72FhOA1CB6v^=I_0/8|jsb9m<.TVac`uY*MK'X~xDl}REokN:#?G\"i@"
 
-rotateTrinary :: Int -> Int
-rotateTrinary val = qt + rm * 19683
+rotateTernary :: Int -> Int
+rotateTernary val = qt + rm * 19683
     where (qt, rm) = divMod val 3
 
 op :: Int -> Int -> Int
@@ -157,4 +160,8 @@ op a dp = sum $ map f ternaryPowers
                            7, 6, 8, 7, 6, 8, 4, 3, 5,
                            8, 8, 7, 8, 8, 7, 5, 5, 4]
 
+errorMsg :: String -> String
 errorMsg msg = "malbolge: " ++ msg
+
+wrapNum :: Int -> Int
+wrapNum n = (n + 1) `mod` numericMax
