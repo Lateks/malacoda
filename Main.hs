@@ -1,10 +1,9 @@
-import Data.Maybe (fromMaybe)
 import Data.Array.Diff (Array, DiffArray, listArray, (!), (//))
 import Data.Char (ord, isAscii, isSpace, chr)
 import System.IO (putChar, putStrLn, withFile, hGetContents, Handle, IOMode(..), isEOF)
 import System.Environment (getArgs)
 import Control.Monad.Trans.State.Lazy (StateT, runStateT, get, put)
-import Control.Monad (guard)
+import Control.Monad (guard, zipWithM)
 import Control.Monad.IO.Class (liftIO)
 
 data MachineState = MachineState {
@@ -36,16 +35,19 @@ main = do
             then putStrLn $ errorMsg "no input files"
             else do
                 memory <- withFile (head args) ReadMode initializeMemory
-                run $ listArray (0, numericMax) memory
-                putChar '\n'
+                case memory of
+                    Left err -> putStrLn err
+                    Right mem -> do
+                        run $ listArray (0, numericMax) mem
+                        putChar '\n'
 
-initializeMemory :: Handle -> IO [Int]
+initializeMemory :: Handle -> IO (Either String [Int])
 initializeMemory h = do
         source <- hGetContents h
         let instrs = filter (not . isSpace) source
         if length instrs > numericMax + 1
-            then error $ errorMsg "input file too long"
-            else readProgramToMemory instrs
+            then return . Left $ errorMsg "input file too long"
+            else return $ readProgramToMemory instrs
 
 run :: Memory -> IO ((), MachineState)
 run memory = runStateT eval MachineState { a = 0, c = 0, d = 0, mem = memory }
@@ -89,17 +91,16 @@ eval = do
                    else do c <- getChar
                            return $ if c == '\n' then 10 else ord c
 
-readProgramToMemory :: String -> IO [Int]
+readProgramToMemory :: String -> Either String [Int]
 readProgramToMemory program =
-    do let programMemory = map extract $ mapWithIndex readInstructionToMemory program
-           n = length programMemory
-       if n < 2
-           then error $ errorMsg "invalid program (too short)"
-           else return $ fillMemory programMemory n
-
-     where mapWithIndex f = zipWith f [0..]
-
-           extract = fromMaybe (error $ errorMsg "invalid instruction in source file")
+    do let mem = zipWithM readInstructionToMemory [0..] program
+       case mem of
+           Nothing -> Left $ errorMsg "invalid instruction in source file"
+           Just instructions -> do
+               let n = length instructions
+               if n < 2
+                  then Left $ errorMsg "invalid program (too short)"
+                  else Right $ fillMemory instructions n
 
 fillMemory :: [Int] -> Int -> [Int]
 fillMemory memory len = let toPair (x:y:xs) = (x, y)
